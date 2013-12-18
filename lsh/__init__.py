@@ -5,9 +5,147 @@ import sys
 import time
 import logging
 from math import sqrt
+import inspect
 
 logging.getLogger().setLevel(logging.INFO)
 
+
+class Shingler(object):
+    """
+    Handles turning a document (a list of tokens) into a sequence of shingles to 
+    be used for minhashing
+    """
+    
+    def __init__(self, shingle_len=2, max_shingle=None):
+        """
+        Create a shingler by specifying the length of shingle.  If you want shingles of 
+        multiple length, then provide a minimum and maximum shingle length.
+        Defaults to a shingle length of 2
+        """
+        assert shingle_len > 0, 'shingle length must be greater than 0, not %d' % shingle_len
+        self._begin_shingle = shingle_len
+        if max_shingle:
+            assert max_shingle >= shingle_len, 'max_shingle must be greater than shingle_len'
+            self._end_shingle = max_shingle + 1
+        else:
+            self._end_shingle = shingle_len + 1
+    
+    def shingle_universe(self, token_universe):
+        """
+        Given a size of the token universe, return the size of the shingle universe
+        """
+        return sum(map(lambda sl: token_universe**sl, xrange(self._begin_shingle, self._end_shingle)))
+   
+    def shingle_len(self):
+        """
+        return the shingle length being used. If only a single shingle length is used, then a single item is returned
+        If multiple shingle lengths are used a tuple of the beginning and end (inclusive) is used.
+        """
+        return self._begin_shingle if not self.is_multi_shingler() else (self._begin_shingle, self._end_shingle-1,)
+ 
+    def shingle_len_str(self):
+        """
+        return a string representing the shingle length.  If there is only one shingle length, it is simply the number
+        Otherwise it represents the range of shingle lengths as 'lower<=upper'
+        """
+        return "<=".join(sorted(set((self._begin_shingle, self._end_shingle-1))))
+
+    def is_multi_shingler(self):
+        """
+        indicates whether this shingler creates shingles of multiple lengths (i.e., whether it shingles the document multiple
+        times)
+        """
+        return self._begin_shingle+1 != self._end_shingle
+    
+    def shingle(self, doc):
+        """
+        Takes a document (a list of tokens) and  of tokenized words returns a sequence and maps each shingle to a unique id.
+        These unique ids, are then added to the shingle_vec object which is just a sparse
+        vector implemented as a dict with v[id]=1 when a shingle id is present
+        """
+        logging.debug('shingling len(doc)=%d', len(doc))
+        for n in xrange(self._begin_shingle, self._end_shingle):
+            if len(doc) < n:
+                yield (None,)*(n-len(doc)) + tuple(doc)
+            else:
+                for j in xrange(len(doc) - (n-1)):
+                    yield tuple(doc[j:j+n])
+
+    def __str__(self):
+        return ("Shingler(len %d<=%d)" if self.is_multi_shingler() else "Shingler(len %d)") % self.shingle_len()                    
+        
+class IHashFamily(object):
+    """
+    An interface for a hash family provider.  It provides a series of random hashes
+    from a universal hash family.  This can then be used for minhashing.
+    """
+    
+    def __init__(self, num_hashes, num_buckets):
+        """
+        Initialize the hash family by indicating how many hashes are needed.  
+        Also indicate the number of buckets that will be hashed to (if that is necessary
+        for choosing parameters).  The hash function is not required to return values less
+        than num_buckets (They will be modulo'd afterwards) 
+        """
+        pass
+    
+    def hashn(self, x):
+        """
+        return a sequence of n hashes of the value x.  n is provided in the construction
+        of the hash family
+        """
+        raise NotImplementedError()
+        
+class XORHashFamily(IHashFamily):
+    """
+    An implementation of a hash family.  This uses random 32-bit hash values which are
+    xor'd with the value (It assumes that the value is an integer)
+    """
+    
+    def __init__(self, num_hashes, num_buckets):
+        """
+        Initialize a random number of 32-bit fields for xoring
+        """
+        self._memomask = [ int(random.getrandbits(32)) for _ in xrange(num_hashes)]
+
+    def _xor_hash(self,x, mask):
+        """
+        This is a simple hash function which returns the result of a bitwise XOR
+        on the input x and the 32-bit random mask
+        """
+        return int(x ^ mask)
+
+    def hashn(self, x):
+        """ 
+        generate the series of hashes of the value to be used for finding the minhash
+        The implementation uses _xor_hashing with a series of random 32-bit fields
+        """
+        # trim x to 32-bits
+        x = x & 0xffffffff
+        return it.imap(lambda mask: self._xor_hash(x, mask), self._memomask)
+ 
+class MultiplyHashFamily(IHashFamily):
+    """
+    An implementation of a hash family that uses random multiplication of the
+    form a * (x>>4) + b * x + c.
+    It assumes that the value is an integer.
+    This method was described in an exercise (http://www.cs.uoi.gr/~tsap/teaching/2012f-cs059/assignments/assignment2-en.pdf)
+    and implemented in java (http://blogs.msdn.com/b/spt/archive/2008/06/10/set-similarity-and-min-hash.aspx)
+    """
+     
+    def __init__(self, num_hashes, num_buckets):
+        """
+        Initialize a set of 3 random integers < num_buckets for each hash
+        """
+        self._params = [ [random.randint(1,num_buckets) for _ in xrange(3)] for _ in xrange(num_hashes)]
+    
+    def _mult_hash(self, x, params):
+        return params[0]*(x>>4) + params[1]*x + params[2]
+    
+    def hashn(self, x):
+        return it.imap(lambda params: self._mult_hash(x, params), self._params)
+
+    
 class LSHCache:
     """
     Locality-Sensitive Hashing (LSH) implementation as described in 
@@ -16,7 +154,8 @@ class LSHCache:
     
     A document is a sequence of items which will be shingled together to look for
     similarity.
-    
+
+    This can bep
     This can be sub-classed to allow for implementing your own method for hashing shingles
     or hashing a shingle into the set of hashes used by minhash.
     
@@ -28,8 +167,9 @@ class LSHCache:
     """
     
     def __init__(self, b=None, r=None, n=None,
-                 min_shingle=None, max_shingle=None, shingle_len=None,
-                 store_signatures = False, dups_on_insert = True, seed=None):
+                 shingler=Shingler(2), shingle_hash=hash,
+                 universe_size = 131071, minhash=MultiplyHashFamily,
+                 store_signatures = False, dups_on_insert = True):
         """
         An implementation of Locality-Sensitive Hashing (LSH) using minhash
         
@@ -44,14 +184,20 @@ class LSHCache:
             b: number of bands
             r: number of rows per band
             n: total number of rows
-        
-        You may also specify the shingling of documents.  If no values are specified, it
-        will a shingle length of 2.  You may specify using multiple shingle lengths by specifying
-        min_shingle and max_shingle instead of shingle_len.  The arguments are:
-            shingle_len: length of shingle to use (cannot be specified with min_shingle and max_shingle)
-            min_shingle: minimum length of shingle to use (cannot be specified with shingle_len)
-            max_shingle: maximum length of shingle to use (cannot be specified with shingle_len)
             
+        You may also specify how a document is shingled and how that shingle is hashed.  Those arguments are:
+            shingler: an instance of Shingler (has the method shingle(doc) that returns an iteration)
+            shingle_hash: how to hash the shingles returned by the shingler.  Defaults to built-in hash
+
+        You may also specify what method is used for minhashing.  
+            universe_size:  size of token universe.  If you know the number of possible tokens
+                            in your universe, you can specify it so that hashing better simulates
+                            a random permutation of rows in a num_tokens x num_rows matrix.  
+                            If it is not known, it is better to leave as a prime number for better 
+                            hash performance.  Defaults to 131071
+            minhash:        class that implements IHashFamily interface or a method that takes a single
+                            argument and returns a sequence of n hashes
+
         Finally, there are a few additional optional arguments.
             store_signatures: whether to store the generated signatures.  This allows later lookups to
                               be done by doc_id rather than having to rehash a document in the cache. By default,
@@ -59,7 +205,6 @@ class LSHCache:
             dups_on_insert:   whether to return the duplicates found in the cache when a new document is
                               inserted.  If False, it returns the generated doc_id for the inserted document.
                               By default, True
-            seed:             seed to set before calling random to set the random bits used for hashing
         """
 
         # default to 20 bands of 5 rows         
@@ -86,32 +231,21 @@ class LSHCache:
             else:
                 raise AssertionError("cannot reasonably divide a prime number of total rows (%d) into bands and rows per band" % n)
         assert b*r==n, "inconsistent specifications of rows and bands"
-        
-        # default shingle_len==2
-        if shingle_len is None and min_shingle is None and max_shingle is None:
-            shingle_len = 2
-    
-        if shingle_len is not None:
-            assert min_shingle is None and max_shingle is None, "too many specifications of shingle length"
-            min_shingle = max_shingle = shingle_len
 
-        assert min_shingle > 0, 'shingle length must be greater than 0, not %d' % min_shingle
-        if max_shingle is None:
-            max_shingle = min_shingle
-        else:
-            assert max_shingle >= min_shingle, 'max_shingle must be greater than min_shingle'
-        
-        logging.debug("building LSH cache with %d total rows (%d bands, %d rows per band) with shingle length %s",
-                      (n, b, r, 
-                       ("<=".join(map(str,sorted(set((min_shingle,max_shingle,))))))
-                       )
-                      )
+        logging.info("building LSH cache with %d total rows (%d bands, %d rows per band) with %s and hashing with %s",
+                      n, b, r, shingler, minhash)
+
+        if inspect.isclass(minhash):
+            minhash = minhash(n, universe_size).hashn
+
         # assign it
         self._b = b
         self._r = r
         self._n = n
-        self._min_shingle = min_shingle
-        self._max_shingle = max_shingle
+        self._shingler = shingler
+        self._shingle_hash = shingle_hash
+        self._minhash = minhash
+        self._universe_size = universe_size
         self._store_signatures = store_signatures
         self._Accumulator = self.AccumulatorDups if dups_on_insert else self.AccumulatorDocId
 
@@ -119,33 +253,6 @@ class LSHCache:
         self._seen = {} # the set of doc ids which have already been hashed
         self._next_id = 0
         self._cache = [defaultdict(list) for _ in xrange(self._b)]
-        if seed is not None:
-            random.seed(seed)
-        self._init_minhash_hash()
-
-
-    def _init_minhash_hash(self):
-        """
-        This initializes the instance variable _memomask which is a list of the 
-        random 32 bits associated with each hash function
-        """
-        self._memomask = [ int(random.getrandbits(32)) for _ in xrange(self._n)]
-
-    def _xor_hash(self,x, mask):
-        """
-        This is a simple hash function which returns the result of a bitwise XOR
-        on the input x and the 32-bit random mask
-        """
-        return int(x ^ mask)
-
-    def _minhash_hash(self, x):
-        """ 
-        generate the series of hashes of the value to be used for finding the minhash
-        The implementation uses _xor_hashing with a series of random 32-bit fields
-        """
-        # trim x to 32-bits
-        x = x & 0xffffffff
-        return it.imap(lambda mask: self._xor_hash(x, mask), self._memomask)
 
     def _hash_shingle(self, shingle):
         return hash(shingle)
@@ -157,15 +264,8 @@ class LSHCache:
         vector implemented as a dict with v[id]=1 when a shingle id is present
         """
         logging.debug('entering with len(doc)=%d', len(doc))
-        v = set()
-        for n in xrange(self._min_shingle, self._max_shingle+1):
-            if len(doc) < n:
-                v.add(self._hash_shingle(('',)*(n-len(doc))+tuple(doc)))
-            else:
-                for j in xrange(len(doc) - (n-1)):
-                    s = tuple(doc[j:j+n])
-                    v.add(self._hash_shingle(s))
-        return v
+        return set(it.imap(lambda shingle: self._shingle_hash(shingle) % self._universe_size, 
+                           self._shingler.shingle(doc)))
 
     def _get_sig(self,shingle_vec):
         """
@@ -177,7 +277,8 @@ class LSHCache:
         mhash = [sys.maxint]*self._n
         for shingle in shingle_vec:
             #logging.debug('r=%d', r)
-            for i,h in enumerate(self._minhash_hash(shingle)):
+            for i,h in enumerate(self._minhash(shingle)):
+                h  = h % self._universe_size
                 if (h < mhash[i]):
                     mhash[i] = h
         return mhash
@@ -287,7 +388,7 @@ class LSHCache:
 
     def insert_batch(self, docs):
         """Batch method for adding db docs to cache"""
-        dups = list()
+        dups = []
         logging.debug('batch inserting len(docs)=%d', len(docs) if hasattr(docs, '__len__') else -1)
         for i, doc_tuple in enumerate(docs):
             if (i % 100 == 0):
@@ -313,6 +414,6 @@ class LSHCache:
     def num_total_rows(self):
         return self._n
     
-    def shingle_len(self):
-        return self._min_shingle if self._min_shingle==self._max_shingle else (self._min_shingle, self._max_shingle)
+    def shingler(self):
+        return self._shingler
 
