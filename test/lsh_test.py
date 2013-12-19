@@ -4,16 +4,8 @@ Created on Dec 13, 2013
 @author: space
 '''
 import unittest
-import os
-import sys
-from nltk.metrics.distance import jaccard_distance
-from math import factorial
 import random
-
-module_filename = sys.modules.get('lsh_test', sys.modules['__main__']).__file__
-print os.path.join(os.path.dirname(module_filename), "..")
-sys.path.append(os.path.join(os.path.dirname(module_filename), ".."))
-
+from nltk.metrics.distance import jaccard_distance
 from lsh import LSHCache, Shingler, XORHashFamily, MultiplyHashFamily
 
 class HashFamilyTest(unittest.TestCase):
