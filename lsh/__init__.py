@@ -231,7 +231,7 @@ class LSHCache:
                 raise AssertionError("cannot reasonably divide a prime number of total rows (%d) into bands and rows per band" % n)
         assert b*r==n, "inconsistent specifications of rows and bands"
 
-        logging.info("building LSH cache with %d total rows (%d bands, %d rows per band) with %s and hashing with %s",
+        logging.debug("building LSH cache with %d total rows (%d bands, %d rows per band) with %s and hashing with %s",
                       n, b, r, shingler, minhash)
 
         if inspect.isclass(minhash):
