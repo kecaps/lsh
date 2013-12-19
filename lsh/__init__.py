@@ -416,4 +416,12 @@ class LSHCache:
     
     def shingler(self):
         return self._shingler
+    
+    def theoretical_percent_found(self, pct_similar):
+        """
+        Returns the theoretical percentage of documents that should be found with the
+        given pct_similarity from this cache
+        """
+        return 1 - (1-pct_similar**self._r)**self._b
+    
 

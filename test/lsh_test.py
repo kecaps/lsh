@@ -153,7 +153,23 @@ class LSHTest(unittest.TestCase):
                               cache.insert_batch([doc.split() for doc in docs]))
 
 
-    
+    def testPercentFound(self):
+        lsh = LSHCache(b=2,r=1)
+        self.assertEqual(0.75, lsh.theoretical_percent_found(0.5))
+        self.assertEqual(0.96, lsh.theoretical_percent_found(0.8))
+        lsh = LSHCache(b=1,r=2)
+        self.assertEqual(0.25, lsh.theoretical_percent_found(0.5))
+        self.assertAlmostEqual(0.64, lsh.theoretical_percent_found(0.8))
+        lsh = LSHCache(b=10,r=10)
+        self.assertAlmostEqual(0.0097, lsh.theoretical_percent_found(0.5), places=4)
+        self.assertAlmostEqual(0.6789, lsh.theoretical_percent_found(0.8), places=4)
+        lsh = LSHCache(b=20,r=5)
+        self.assertAlmostEqual(0.4701, lsh.theoretical_percent_found(0.5), places=4)
+        self.assertAlmostEqual(0.9996, lsh.theoretical_percent_found(0.8), places=4)
+        lsh = LSHCache(b=25,r=4)
+        self.assertAlmostEqual(0.8008, lsh.theoretical_percent_found(0.5), places=4)
+        self.assertAlmostEqual(1.0000, lsh.theoretical_percent_found(0.8), places=4)
+        
     def testLSH(self):
         strings = [
                    "abcdefghijklmnopqrstuvwxyz",
