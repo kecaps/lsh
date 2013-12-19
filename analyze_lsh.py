@@ -155,18 +155,18 @@ def main(argv=None):
 
     print ("| %12s "*5+'|') % ("Similarity", "LSH Count", "Total Count", "% in LSH", "Theoretical %")
     print "|" + ("-"*14+'+')*4 + "-"*14 + "|"
+    total_theoretical_pct = 0
     for i, (lsh_count, total_count) in enumerate(zip(lsh_distribution, total_distribution)):
         sim = float(i)/args.sim_cuts
         pct_in_lsh = float(lsh_count)/total_count if total_count else float('inf')
         theoretical_pct = cache.theoretical_percent_found(sim)
-        print "| %12.2f | %12d | %12d | %12.2f | %12.2f |" % \
-            (sim, lsh_count, total_count, pct_in_lsh, theoretical_pct) 
-
-    print
-    print "Total comparisons: %7d" % sum(total_distribution) 
-    print "LSH comparisons:   %7d (%.2f)" % \
-        (sum(lsh_distribution), (float(sum(lsh_distribution))/sum(total_distribution)))
-
+        print "| %12.2f | %12d | %12d | %12.4f | %12.4f |" % \
+            (sim, lsh_count, total_count, pct_in_lsh, theoretical_pct)
+        total_theoretical_pct += theoretical_pct * total_count 
+    print "|" + ("="*14+'+')*4 + "="*14 + "|"
+    print "| %12s | %12d | %12d | %12.4f | %12.4f |" % \
+            ("Total", sum(lsh_distribution), sum(total_distribution),
+             float(sum(lsh_distribution))/sum(total_distribution), total_theoretical_pct/sum(total_distribution))  
 
 if __name__ == '__main__':
     main()
