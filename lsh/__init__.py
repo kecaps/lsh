@@ -63,7 +63,6 @@ class Shingler(object):
         These unique ids, are then added to the shingle_vec object which is just a sparse
         vector implemented as a dict with v[id]=1 when a shingle id is present
         """
-        logging.debug('shingling len(doc)=%d', len(doc))
         for n in xrange(self._begin_shingle, self._end_shingle):
             if len(doc) < n:
                 yield (None,)*(n-len(doc)) + tuple(doc)
@@ -263,7 +262,6 @@ class LSHCache:
         These unique ids, are then added to the shingle_vec object which is just a sparse
         vector implemented as a dict with v[id]=1 when a shingle id is present
         """
-        logging.debug('entering with len(doc)=%d', len(doc))
         return set(it.imap(lambda shingle: self._shingle_hash(shingle) % self._universe_size, 
                            self._shingler.shingle(doc)))
 
@@ -300,11 +298,8 @@ class LSHCache:
         """
         given an iterable of hashable items, returns a list of bucket ids
         """
-        logging.debug('got tokenized doc: len(doc)=%d', len(doc))
         shingle_vec = self._get_shingle_vec(doc)
-        logging.debug('got shingle_vec: len(shingle_vec)=%d', len(shingle_vec))
         sig = self._get_sig(shingle_vec) # n-dimensional min-hash signiture
-        logging.debug('got minhash sig: len(sig)=%d', len(sig))
         lsh = self._get_lsh(sig) # r-dimensional list of bucket ids
         return lsh
 
