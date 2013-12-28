@@ -144,11 +144,26 @@ class LSHTest(unittest.TestCase):
                               set()],
                               cache.insert_batch([doc.split() for doc in docs]))
 
+        # least strict
+        random.seed(12345)
+        cache = LSHCache(b=50,r=2,m=3)
+        self.assertListEqual([set(),
+                              set([0]),
+                              set(),
+                              set([0,1,2]),
+                              set([0,2,3]),
+                              set([0,1,3]),
+                              set([0,1,3,5]),
+                              set(),
+                              set([7]),
+                              set(),
+                              set([9])],
+                              cache.insert_batch([doc.split() for doc in docs]))
 
     def testPercentFound(self):
         lsh = LSHCache(b=2,r=1)
         self.assertEqual(0.75, lsh.theoretical_percent_found(0.5))
-        self.assertEqual(0.96, lsh.theoretical_percent_found(0.8))
+        self.assertAlmostEqual(0.96, lsh.theoretical_percent_found(0.8))
         lsh = LSHCache(b=1,r=2)
         self.assertEqual(0.25, lsh.theoretical_percent_found(0.5))
         self.assertAlmostEqual(0.64, lsh.theoretical_percent_found(0.8))
@@ -161,6 +176,9 @@ class LSHTest(unittest.TestCase):
         lsh = LSHCache(b=25,r=4)
         self.assertAlmostEqual(0.8008, lsh.theoretical_percent_found(0.5), places=4)
         self.assertAlmostEqual(1.0000, lsh.theoretical_percent_found(0.8), places=4)
+        lsh = LSHCache(b=25,r=4,m=3)
+        self.assertAlmostEqual(0.2032, lsh.theoretical_percent_found(0.5), places=4)
+        self.assertAlmostEqual(0.9997, lsh.theoretical_percent_found(0.8), places=4)
         
     def testLSH(self):
         strings = [
@@ -205,42 +223,49 @@ class LSHTest(unittest.TestCase):
         self.assertEqual(5, lsh.num_rows_per_band())
         self.assertEqual(100, lsh.num_total_rows())
         self.assertEqual(2, lsh.shingler().shingle_len())
+        self.assertEqual(1, lsh.min_support())
         
         lsh = LSHCache(b=10, r=7)
         self.assertEqual(10, lsh.num_bands())
         self.assertEqual(7, lsh.num_rows_per_band())
         self.assertEqual(70, lsh.num_total_rows())
         self.assertEqual(2, lsh.shingler().shingle_len())
-        
+        self.assertEqual(1, lsh.min_support())
+
         lsh = LSHCache(n=70, r=7)
         self.assertEqual(10, lsh.num_bands())
         self.assertEqual(7, lsh.num_rows_per_band())
         self.assertEqual(70, lsh.num_total_rows())
         self.assertEqual(2, lsh.shingler().shingle_len())
+        self.assertEqual(1, lsh.min_support())
         
-        lsh = LSHCache(n=70, b=10)
+        lsh = LSHCache(n=70, b=10, m=3)
         self.assertEqual(10, lsh.num_bands())
         self.assertEqual(7, lsh.num_rows_per_band())
         self.assertEqual(70, lsh.num_total_rows())
         self.assertEqual(2, lsh.shingler().shingle_len())
+        self.assertEqual(3, lsh.min_support())
 
         lsh = LSHCache(n=70, b=10, r=7)
         self.assertEqual(10, lsh.num_bands())
         self.assertEqual(7, lsh.num_rows_per_band())
         self.assertEqual(70, lsh.num_total_rows())
         self.assertEqual(2, lsh.shingler().shingle_len())
+        self.assertEqual(1, lsh.min_support())
         
         lsh = LSHCache(shingler=Shingler(5))
         self.assertEqual(20, lsh.num_bands())
         self.assertEqual(5, lsh.num_rows_per_band())
         self.assertEqual(100, lsh.num_total_rows())
         self.assertEqual(5, lsh.shingler().shingle_len())
+        self.assertEqual(1, lsh.min_support())
         
         lsh = LSHCache(shingler=Shingler(2,3))
         self.assertEqual(20, lsh.num_bands())
         self.assertEqual(5, lsh.num_rows_per_band())
         self.assertEqual(100, lsh.num_total_rows())
         self.assertEqual((2,3,), lsh.shingler().shingle_len())
+        self.assertEqual(1, lsh.min_support())
 
 
 if __name__ == "__main__":

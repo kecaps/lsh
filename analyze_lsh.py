@@ -35,6 +35,8 @@ def parse_args(argv=None):
                         help="""number of rows per band in LSH cache""")
     lsh_group.add_argument("-n", "--num-total", type=int,
                         help="""total number of rows in LSH cache""")
+    lsh_group.add_argument("-m", "--min-support", type=int,
+                           help="""minimum support of bands in LSH cache for match""")
     lsh_group.add_argument("--minhash",
                            choices=minhash_choices.keys())
     lsh_group.add_argument("-u", "--universe-size", type=int,
@@ -87,7 +89,7 @@ def lsh_cache_from_args(args):
     kwargs = {"shingler": Shingler(*args.shingle_len) }
     if args.minhash:
         kwargs['minhash'] = minhash_choices[args.minhash]
-    for arg_key, kwarg_key in (('num_total','n'),('num_bands','b'),('num_rows','r'),('universe_size',)*2):
+    for arg_key, kwarg_key in (('num_total','n'),('num_bands','b'),('num_rows','r'),('min_support','m'),('universe_size',)*2):
         value = getattr(args, arg_key)
         if value:
             kwargs[kwarg_key] = value

@@ -1,10 +1,11 @@
-from collections import defaultdict
+from collections import defaultdict, Counter
 import itertools as it
+import functools as ft
 import random
 import sys
 import time
 import logging
-from math import sqrt
+from math import sqrt, factorial, fsum
 import inspect
 
 logging.getLogger().setLevel(logging.INFO)
@@ -165,15 +166,16 @@ class LSHCache:
     seen to a unique id and return that.
     """
     
-    def __init__(self, b=None, r=None, n=None,
+    def __init__(self, b=None, r=None, n=None, m=1,
                  shingler=Shingler(2), shingle_hash=hash,
                  universe_size = 131071, minhash=MultiplyHashFamily,
-                 store_signatures = False, dups_on_insert = True):
+                 store_signatures = False):
         """
         An implementation of Locality-Sensitive Hashing (LSH) using minhash
         
         All arguments are optional. If no additional arguments are specified, 
-        the LSH will be 20 bands of 5 rows each (100 total rows) with a shingle length of 2.
+        the LSH will be 20 bands of 5 rows each (100 total rows) returning with 1 band matching 
+        and with a shingle length of 2.
         
         You can specify the number of bands and rows or just the total number of rows
         and either bands and rows-per-band.  If the specification is incomplete, it will determine
@@ -183,6 +185,7 @@ class LSHCache:
             b: number of bands
             r: number of rows per band
             n: total number of rows
+            m: minimum support (minimum number of bands to match for similarity)
             
         You may also specify how a document is shingled and how that shingle is hashed.  Those arguments are:
             shingler: an instance of Shingler (has the method shingle(doc) that returns an iteration)
@@ -230,9 +233,9 @@ class LSHCache:
             else:
                 raise AssertionError("cannot reasonably divide a prime number of total rows (%d) into bands and rows per band" % n)
         assert b*r==n, "inconsistent specifications of rows and bands"
-
-        logging.debug("building LSH cache with %d total rows (%d bands, %d rows per band) with %s and hashing with %s",
-                      n, b, r, shingler, minhash)
+        assert m >= 0 and int(m) == m and m <= b, "matching bands must be positive integer less than number of bands"
+        logging.debug("building LSH cache with %d total rows (%d matching of %d bands, %d rows per band) with %s and hashing with %s",
+                      m, n, b, r, shingler, minhash)
 
         if inspect.isclass(minhash):
             minhash = minhash(n, universe_size).hashn
@@ -241,13 +244,18 @@ class LSHCache:
         self._b = b
         self._r = r
         self._n = n
+        self._m = m
+        if m <= 1:
+            self._reduce = self._reduce_sets
+        else:
+            self._reduce = ft.partial(self._reduce_sets_by_min, min_support=m)
+
         self._shingler = shingler
         self._shingle_hash = shingle_hash
         self._minhash = minhash
         self._universe_size = universe_size
         self._store_signatures = store_signatures
-        self._Accumulator = self.AccumulatorDups if dups_on_insert else self.AccumulatorDocId
-
+        
         # make it 
         self._seen = {} # the set of doc ids which have already been hashed
         self._next_id = 0
@@ -309,53 +317,45 @@ class LSHCache:
         id in the corresponding bucket for each of the _b tables
         """
         assert doc_id not in self._seen, "Document with doc_id %d has already been inserted" % doc_id 
-        accum = self._Accumulator(lsh, doc_id)
         self._seen[doc_id] = lsh if self._store_signatures else None
         if doc_id >= self._next_id:
             self._next_id = doc_id+1
+        return self._reduce(self._insert_lsh_generator(lsh, doc_id))
+    
+    def _insert_lsh_generator(self, lsh, doc_id):    
+        """
+        Inserts the doc_id across all the band hashtables by its portion of lsh.  This is to 
+        be used with _insert_lsh as it modifies the structure yielding the current contents 
+        of each of those bands as it adds the doc_id.
+        """ 
         for i,band_bucket in enumerate(lsh):
             arr = self._cache[i][band_bucket]
-            accum.update(arr)
+            yield arr
             arr.append(doc_id)
-        return accum.result()
-
-    class IAccumulator(object):
-        def __init__(self, lsh, doc_id):
-            pass
-        
-        def update(self, dups):
-            pass
-        
-        def result(self):
-            raise NotImplementedError
-        
-    class AccumulatorDocId(IAccumulator):
-        def __init__(self, lsh, doc_id):
-            self._doc_id = doc_id
-        
-        def result(self):
-            return self._doc_id
-        
-    class AccumulatorDups(IAccumulator):
-        def __init__(self, *args):
-            self._dups = set()
-        
-        def update(self, dups):
-            self._dups.update(dups)
-        
-        def result(self):
-            return self._dups
-
-    @classmethod
-    def _reduce_dup_buckets(cls, buckets, doc_id=None):
-        # logging.debug('buckets: %s', buckets)
-        all_buckets = reduce(set.update, buckets, set)
-        if doc_id is not None:
-            all_buckets.discard(doc_id)
-        return all_buckets
-
+            
+    @staticmethod        
+    def _reduce_sets(sets):
+        """
+        Reduce a set of sequences into the intersection of all the sets.
+        This handles the degenerative case where minimum_support is 1
+        """
+        return reduce(set.union, sets, set())        
+    
+    @staticmethod
+    def _reduce_sets_by_min(sets, min_support):
+        """
+        Reduce a set of sequences and return a set of objects occurring at least
+        min times across the set. 
+        """
+        def counter_union(c,s):
+            c.update(s)
+            return c
+        counts = reduce(counter_union, sets, Counter())
+        return set(it.imap(lambda (item, _): item,
+                           it.ifilter(lambda (_, count): count >= min_support,
+                                      counts.iteritems())))    
+    
     # public methods
-
     def get_dup_buckets(self, doc, doc_id=None):
         """
         Returns a list of buckets (which are themselves lists) that contain the ids
@@ -372,7 +372,12 @@ class LSHCache:
             yield self._cache[i][band_bucket]
 
     def get_dups(self, doc, doc_id=None):
-        return self._reduce_dup_buckets(self.get_dup_buckets(doc, doc_id),doc_id)
+        
+        buckets = self.get_dup_buckets(doc, doc_id)
+        all_buckets = self._reduce(buckets)
+        if doc_id is not None:
+            all_buckets.discard(doc_id)
+        return all_buckets
 
     def insert(self, doc, doc_id=None):
         if doc_id is None: 
@@ -403,6 +408,9 @@ class LSHCache:
     def num_bands(self):
         return self._b
     
+    def min_support(self):
+        return self._m
+    
     def num_rows_per_band(self):
         return self._r
     
@@ -417,6 +425,31 @@ class LSHCache:
         Returns the theoretical percentage of documents that should be found with the
         given pct_similarity from this cache
         """
-        return 1 - (1-pct_similar**self._r)**self._b
-    
+        pct_band_match = pct_similar**self._r
 
+        if self._m < self._b - self._m:
+            return 1 - pbinom(pct_band_match, self._b, self._m-1)
+        else:
+            return pbinom(pct_band_match, self._b, min_r=self._m, r=self._b)
+
+def nCr(n,r):
+    """
+    combinatorics n choose r
+    """
+    return factorial(n)/(factorial(r)*factorial(n-r))
+
+def dbinom(pct, n, r):
+    """
+    density of binomial distribution. Returns percentage that 
+    exactly r  of n independent trials given pct of a single trial
+    Follows naming conventions of r 
+    """
+    return nCr(n,r) * (pct**r) * ((1-pct)**(n-r))
+
+def pbinom(pct, n, r, min_r=0):
+    """
+    distribution function of a binomial distribution. Returns percentage
+    that between min_r and r of n independent trials given pct of a single trial
+    Follows naming conventions of r
+    """
+    return fsum(it.imap(ft.partial(dbinom, pct, n), xrange(min_r,r+1)))
