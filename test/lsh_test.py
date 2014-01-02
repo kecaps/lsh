@@ -160,6 +160,19 @@ class LSHTest(unittest.TestCase):
                               set([9])],
                               cache.insert_batch([doc.split() for doc in docs]))
 
+    def testClear(self):
+        random.seed(12345)
+        lsh = LSHCache()
+        self.assertSetEqual(set(), lsh.insert("123456789"))
+        self.assertSetEqual(set([0]), lsh.insert("34567890"))
+        self.assertSetEqual(set([0]), lsh.insert("0123456"))
+        self.assertSetEqual(set([0,1,2]), lsh.insert("123456789"))
+        lsh.clear()
+        self.assertSetEqual(set(), lsh.insert("123456789"))
+        self.assertSetEqual(set([0]), lsh.insert("34567890"))
+        self.assertSetEqual(set([0]), lsh.insert("0123456"))
+        self.assertSetEqual(set([0,1,2]), lsh.insert("123456789"))
+        
     def testPercentFound(self):
         lsh = LSHCache(b=2,r=1)
         self.assertEqual(0.75, lsh.theoretical_percent_found(0.5))

@@ -257,9 +257,7 @@ class LSHCache:
         self._store_signatures = store_signatures
         
         # make it 
-        self._seen = {} # the set of doc ids which have already been hashed
-        self._next_id = 0
-        self._cache = [defaultdict(list) for _ in xrange(self._b)]
+        self.clear()
 
     def _hash_shingle(self, shingle):
         return hash(shingle)
@@ -398,6 +396,12 @@ class LSHCache:
             else:
                 dups.append(self.insert(doc_tuple))
         return dups
+
+    def clear(self):
+        """recreate an empty cache of all entries and reset the doc_id counter"""
+        self._seen = {} # the set of doc ids which have already been hashed
+        self._next_id = 0
+        self._cache = [defaultdict(list) for _ in xrange(self._b)]
 
     def num_docs(self):
         return len(self._seen)
