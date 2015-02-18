@@ -18,7 +18,7 @@ class HashFamilyTest(unittest.TestCase):
         self.assertEqual(10, len(h1))
         
         for ndx, h in enumerate(family.hashn(1243)):
-            self.assertNotEqual(h1[ndx], h)
+            self.assertEqual(h1[ndx], h)
         
         family = hash_family(10, 131071)
         for ndx, h in enumerate(family.hashn(1234)):
